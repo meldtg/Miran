@@ -2,7 +2,6 @@
 data/
 _scripts/
 static/
-media/
 dumps/
 *.dump
 
