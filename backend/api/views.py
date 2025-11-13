@@ -11,6 +11,8 @@ from .services.telegram_logger import send_user_verified_log
 from .services.telegram_notifier import send_excel_report
 from django.db.models.functions import ExtractYear, ExtractMonth
 from django.db.models import Count, Max
+import os
+from urllib.parse import urlparse
 
 
 @api_view(["GET"])
@@ -49,6 +51,18 @@ def init(request):
         }
     })
 
+# Helper to build absolute public media URLs on fixed host
+PUBLIC_MEDIA_HOST = os.getenv("PUBLIC_MEDIA_HOST", "https://miran-production.up.railway.app").rstrip("/")
+
+def make_public_url(url: str) -> str:
+    if not url:
+        return url
+    if url.startswith("http://") or url.startswith("https://"):
+        p = urlparse(url)
+        path_q = p.path + (("?" + p.query) if p.query else "")
+        return f"{PUBLIC_MEDIA_HOST}{path_q}"
+    # url is a path like /media/...
+    return f"{PUBLIC_MEDIA_HOST}{url}"
 
 @api_view(["POST"])
 def check_code(request):
@@ -647,16 +661,13 @@ def checker_day_detail(request):
                    .select_related("question")
                    .filter(session=last_session)
                    .order_by("answered_at"))
-        # Build answers with ngrok param for images to bypass interstitial
+        # Build answers with public media host
         last_answers = []
         for ans in answers:
             photo_url = None
             if ans.defect_photo:
-                photo_url = ans.defect_photo.url
-                if photo_url and not photo_url.startswith("http"):
-                    photo_url = request.build_absolute_uri(photo_url)
-                if photo_url:
-                    photo_url = f"{photo_url}{'&' if '?' in photo_url else '?'}ngrok-skip-browser-warning=true"
+                raw = ans.defect_photo.url
+                photo_url = make_public_url(raw)
             last_answers.append({
                 "question_id": ans.question_id,
                 "question_text": ans.question.text,
@@ -845,11 +856,8 @@ def start_inspection(request):
         for ans in prev_answers:
             photo_url = None
             if ans.defect_photo:
-                photo_url = ans.defect_photo.url
-                if photo_url and not photo_url.startswith("http"):
-                    photo_url = request.build_absolute_uri(photo_url)
-                if photo_url:
-                    photo_url = f"{photo_url}{'&' if '?' in photo_url else '?'}ngrok-skip-browser-warning=true"
+                raw = ans.defect_photo.url
+                photo_url = make_public_url(raw)
             prev_fail_map[ans.question_id] = {
                 "prev_failed": True,
                 "prev_defect_photo": photo_url,
@@ -859,10 +867,8 @@ def start_inspection(request):
     questions = []
     for q in ChecklistQuestion.objects.filter(checklist=checklist).order_by("order", "id"):
         ref_url = q.reference_image.url if q.reference_image else None
-        if ref_url and not ref_url.startswith("http"):
-            ref_url = request.build_absolute_uri(ref_url)
         if ref_url:
-            ref_url = f"{ref_url}{'&' if '?' in ref_url else '?'}ngrok-skip-browser-warning=true"
+            ref_url = make_public_url(ref_url)
         qpayload = {"id": q.id, "text": q.text, "reference_image": ref_url}
         if q.id in prev_fail_map:
             qpayload.update(prev_fail_map[q.id])
